@@ -132,6 +132,7 @@ function askBuddy(text,image){
         addBubble('buddy',reply);
         convo.push({role:'user',content:text||'(Foto)'});convo.push({role:'assistant',content:reply});
         if(convo.length>20)convo=convo.slice(-20);
+        try{render(current);}catch(e){}
       });
   }).catch(function(){typing.remove();addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');});
 }
