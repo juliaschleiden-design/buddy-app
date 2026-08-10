@@ -9,6 +9,12 @@ html,body{margin:0;height:100%;background:#EFEBE3}
 #binput{flex:1;min-width:0;height:34px;font-size:13px}
 #buddybar button{width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 #agentbar{display:flex;align-items:center;justify-content:space-between;padding:4px 10px 9px}
+#chatpanel{position:fixed;left:50%;transform:translateX(-50%);bottom:92px;z-index:40;width:calc(100% - 20px);max-width:392px;max-height:60vh;display:none;flex-direction:column;background:#FFFFFF;border:0.5px solid #E7E3DA;border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,0.16);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif}
+#chathead{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:0.5px solid #EFEBE3;font-size:13px;color:#5C574E;flex:none}
+#chatmsgs{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}
+.cbub{max-width:82%;font-size:13px;line-height:1.5;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.cbub.user{align-self:flex-end;background:#178a9e;color:#fff;border-bottom-right-radius:5px}
+.cbub.buddy{align-self:flex-start;background:#F4F1EB;color:#2A2724;border-bottom-left-radius:5px}
 #toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,14px);opacity:0;z-index:50;
  max-width:340px;width:calc(100% - 32px);background:#FFFFFF;border:0.5px solid #E7E3DA;
  box-shadow:0 8px 30px rgba(0,0,0,0.16);border-radius:14px;padding:11px 13px;display:flex;gap:10px;
@@ -40,6 +46,10 @@ html,body{margin:0;height:100%;background:#EFEBE3}
     </div>
     <div id="agentbar"></div>
   </div>
+</div>
+<div id="chatpanel">
+  <div id="chathead"><span style="font-size:15px">🦦</span><span style="flex:1;font-weight:500;color:#2A2724">Buddy</span><button id="chatclose" aria-label="Schließen" style="border:none;background:transparent;color:#948E82;font-size:20px;line-height:1;cursor:pointer;padding:0 4px">×</button></div>
+  <div id="chatmsgs"></div>
 </div>
 <div id="toast"></div>
 <div id="gate">
@@ -101,15 +111,38 @@ function showToast(text){
   if(toastTimer)clearTimeout(toastTimer);
   toastTimer=setTimeout(function(){toast.style.opacity='0';toast.style.transform='translate(-50%,14px)';},2800);
 }
+// ---- Chat mit dem echten Buddy (Edge Function) ----
+var chatpanel=document.getElementById('chatpanel'), chatmsgs=document.getElementById('chatmsgs');
+document.getElementById('chatclose').addEventListener('click',function(){chatpanel.style.display='none';});
+function addBubble(who,text){var b=document.createElement('div');b.className='cbub '+who;b.textContent=text;chatmsgs.appendChild(b);chatpanel.style.display='flex';chatmsgs.scrollTop=chatmsgs.scrollHeight;return b;}
+var convo=[];
+function askBuddy(text){
+  text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
+  if(!text)return;
+  addBubble('user',text);
+  var typing=addBubble('buddy','🦦 denkt…');
+  refreshSession().then(function(s){
+    if(!s){typing.remove();showGate();return;}
+    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:text,history:convo})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        typing.remove();
+        var reply=(d&&d.reply)||(d&&d.error)||'Hm, da ging gerade was schief. 🙈';
+        addBubble('buddy',reply);
+        convo.push({role:'user',content:text});convo.push({role:'assistant',content:reply});
+        if(convo.length>20)convo=convo.slice(-20);
+      });
+  }).catch(function(){typing.remove();addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');});
+}
 window.addEventListener('message',function(e){
   var d=e.data||{};
   if(d.t==='back'){back();}
   else if(d.t==='go'){ navTo(String(d.x||'')); }
-  else if(d.t==='nav'){ if(!route(String(d.x||''))) showToast(String(d.x||'')); }
+  else if(d.t==='nav'){ if(!route(String(d.x||''))) askBuddy(String(d.x||'')); }
 });
 // persistent Buddy input
 var binput=document.getElementById('binput');
-function buddySend(){ var v=(binput.value||'').trim(); showToast('Buddy, '+(v||'')); binput.value=''; }
+function buddySend(){ var v=(binput.value||'').trim(); if(v){askBuddy(v);} binput.value=''; }
 document.getElementById('bsend').addEventListener('click',buddySend);
 document.getElementById('bcam').addEventListener('click',function(){showToast('Buddy, ich lade ein Foto hoch – ordne es dem richtigen Agenten zu');});
 document.getElementById('bmic').addEventListener('click',function(){showToast('Buddy, ich schicke dir eine Sprachnachricht');});
