@@ -43,6 +43,7 @@ html,body{margin:0;height:100%;background:#EFEBE3}
       <button id="bcam" aria-label="Foto"><i class="ti ti-camera" style="font-size:18px;color:var(--text-secondary);" aria-hidden="true"></i></button>
       <button id="bmic" aria-label="Sprache"><i class="ti ti-microphone" style="font-size:18px;color:var(--text-secondary);" aria-hidden="true"></i></button>
       <button id="bsend" aria-label="Senden"><i class="ti ti-arrow-up" aria-hidden="true"></i></button>
+      <input type="file" id="camin" accept="image/*" capture="environment" style="display:none" />
     </div>
     <div id="agentbar"></div>
   </div>
@@ -116,20 +117,20 @@ var chatpanel=document.getElementById('chatpanel'), chatmsgs=document.getElement
 document.getElementById('chatclose').addEventListener('click',function(){chatpanel.style.display='none';});
 function addBubble(who,text){var b=document.createElement('div');b.className='cbub '+who;b.textContent=String(text||'').replace(/\*\*/g,'').replace(/^#+\s*/gm,'');chatmsgs.appendChild(b);chatpanel.style.display='flex';chatmsgs.scrollTop=chatmsgs.scrollHeight;return b;}
 var convo=[];
-function askBuddy(text){
+function askBuddy(text,image){
   text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
-  if(!text)return;
-  addBubble('user',text);
+  if(!text&&!image)return;
+  addBubble('user',text||'📷 Foto');
   var typing=addBubble('buddy','🦦 denkt…');
   refreshSession().then(function(s){
     if(!s){typing.remove();showGate();return;}
-    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:text,history:convo})})
+    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:text,history:convo,image:image||null})})
       .then(function(r){return r.json();})
       .then(function(d){
         typing.remove();
         var reply=(d&&d.reply)||(d&&d.error)||'Hm, da ging gerade was schief. 🙈';
         addBubble('buddy',reply);
-        convo.push({role:'user',content:text});convo.push({role:'assistant',content:reply});
+        convo.push({role:'user',content:text||'(Foto)'});convo.push({role:'assistant',content:reply});
         if(convo.length>20)convo=convo.slice(-20);
       });
   }).catch(function(){typing.remove();addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');});
@@ -144,8 +145,38 @@ window.addEventListener('message',function(e){
 var binput=document.getElementById('binput');
 function buddySend(){ var v=(binput.value||'').trim(); if(v){askBuddy(v);} binput.value=''; }
 document.getElementById('bsend').addEventListener('click',buddySend);
-document.getElementById('bcam').addEventListener('click',function(){showToast('Buddy, ich lade ein Foto hoch – ordne es dem richtigen Agenten zu');});
-document.getElementById('bmic').addEventListener('click',function(){showToast('Buddy, ich schicke dir eine Sprachnachricht');});
+// Foto: aufnehmen/auswaehlen -> verkleinern -> an Buddy (Claude sieht es)
+document.getElementById('bcam').addEventListener('click',function(){document.getElementById('camin').click();});
+document.getElementById('camin').addEventListener('change',function(e){
+  var f=e.target.files&&e.target.files[0]; e.target.value='';
+  if(!f)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var img=new Image();
+    img.onload=function(){
+      var mx=1400,w=img.width,h=img.height;
+      if(w>mx||h>mx){var r=Math.min(mx/w,mx/h);w=Math.round(w*r);h=Math.round(h*r);}
+      var cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      var m=/^data:(.*?);base64,(.*)$/.exec(cv.toDataURL('image/jpeg',0.82));
+      if(m){askBuddy((binput.value||'').trim(),{media_type:m[1],data:m[2]});binput.value='';}
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(f);
+});
+// Sprache: Diktat per Web Speech API -> Text -> an Buddy
+document.getElementById('bmic').addEventListener('click',function(){
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){showToast('Sprache klappt auf diesem Geraet nicht – tipp mir einfach. 🙈');return;}
+  var mic=document.getElementById('bmic').querySelector('i');
+  var rec=new SR();rec.lang='de-DE';rec.interimResults=false;rec.maxAlternatives=1;
+  rec.onstart=function(){if(mic)mic.style.color='#D85A30';};
+  rec.onresult=function(ev){binput.value=(ev.results[0][0].transcript||'');};
+  rec.onerror=function(){if(mic)mic.style.color='';};
+  rec.onend=function(){if(mic)mic.style.color='';var v=(binput.value||'').trim();if(v){askBuddy(v);binput.value='';}};
+  try{rec.start();}catch(e){}
+});
 binput.addEventListener('keydown',function(e){if(e.key==='Enter')buddySend();});
 
 // ---- Login / Session (merkt sich, erneuert automatisch) ----
