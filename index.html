@@ -140,31 +140,41 @@ function isSilent(t,img){
   if(/auswert|\u00fcberblick|ueberblick|analyse|bilanz|bericht|zusammenfass|empfehl|vorschlag|erz\u00e4hl|prognose/i.test(c))return false;
   return true;
 }
+var buddyBusy=false,buddyQueue=[];
 function askBuddy(text,image){
   text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
   if(!text&&!image)return;
   var silent=isSilent(text,image)&&chatpanel.style.display!=='flex';
-  var typing=null;
   addBubble('user',text||'📷 Foto',silent);
   if(silent){ showToast((image?'📷 ':'')+'Trag ich ein…'); }
-  else{ try{chatin.focus();}catch(e){} typing=addBubble('buddy','🦦 denkt…'); }
+  else{ try{chatin.focus();}catch(e){} }
+  buddyQueue.push({t:text,img:image||null,silent:silent});
+  pumpBuddy();
+}
+function pumpBuddy(){
+  if(buddyBusy||!buddyQueue.length)return;
+  buddyBusy=true;
+  var job=buddyQueue.shift();
+  var typing=job.silent?null:addBubble('buddy','🦦 denkt…');
+  var done=function(){buddyBusy=false;pumpBuddy();};
   refreshSession().then(function(s){
-    if(!s){if(typing)typing.remove();showGate();return;}
-    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:text,history:convo,image:image||null})})
+    if(!s){if(typing)typing.remove();done();showGate();return;}
+    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:job.t,history:convo,image:job.img})})
       .then(function(r){return r.json();})
       .then(function(d){
         if(typing)typing.remove();
         var reply=(d&&d.reply)||(d&&d.error)||'Hm, da ging gerade was schief. 🙈';
-        convo.push({role:'user',content:text||'(Foto)'});convo.push({role:'assistant',content:reply});
+        convo.push({role:'user',content:job.t||'(Foto)'});convo.push({role:'assistant',content:reply});
         if(convo.length>20)convo=convo.slice(-20);
-        if(silent){
+        if(job.silent){
           var needChat=/\?/.test(reply)||reply.length>170;
           addBubble('buddy',reply,!needChat);
           if(needChat){ try{chatin.focus();}catch(e){} } else showToast(reply);
         } else { addBubble('buddy',reply); }
         try{render(current);}catch(e){}
+        done();
       });
-  }).catch(function(){if(typing)typing.remove();if(!silent)addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');else showToast('Ging gerade nicht durch 🙈');});
+  }).catch(function(){if(typing)typing.remove();if(!job.silent)addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');else showToast('Ging gerade nicht durch 🙈');done();});
 }
 window.addEventListener('message',function(e){
   var d=e.data||{};
