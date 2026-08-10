@@ -114,7 +114,7 @@ function showToast(text){
 // ---- Chat mit dem echten Buddy (Edge Function) ----
 var chatpanel=document.getElementById('chatpanel'), chatmsgs=document.getElementById('chatmsgs');
 document.getElementById('chatclose').addEventListener('click',function(){chatpanel.style.display='none';});
-function addBubble(who,text){var b=document.createElement('div');b.className='cbub '+who;b.textContent=text;chatmsgs.appendChild(b);chatpanel.style.display='flex';chatmsgs.scrollTop=chatmsgs.scrollHeight;return b;}
+function addBubble(who,text){var b=document.createElement('div');b.className='cbub '+who;b.textContent=String(text||'').replace(/\*\*/g,'').replace(/^#+\s*/gm,'');chatmsgs.appendChild(b);chatpanel.style.display='flex';chatmsgs.scrollTop=chatmsgs.scrollHeight;return b;}
 var convo=[];
 function askBuddy(text){
   text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
