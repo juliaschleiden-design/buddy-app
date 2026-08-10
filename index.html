@@ -117,7 +117,7 @@ function showToast(text){
   toast.innerHTML='<span style="font-size:18px">🦦</span><div style="font-size:13px;color:var(--text-primary);line-height:1.45">'+t+'</div>';
   toast.style.opacity='1'; toast.style.transform='translate(-50%,0)';
   if(toastTimer)clearTimeout(toastTimer);
-  toastTimer=setTimeout(function(){toast.style.opacity='0';toast.style.transform='translate(-50%,14px)';},2800);
+  toastTimer=setTimeout(function(){toast.style.opacity='0';toast.style.transform='translate(-50%,14px)';},Math.min(7000,2200+t.length*28));
 }
 // ---- Chat mit dem echten Buddy (Edge Function) ----
 var chatpanel=document.getElementById('chatpanel'), chatmsgs=document.getElementById('chatmsgs'), chatin=document.getElementById('chatin');
@@ -129,8 +129,8 @@ function addBubble(who,text){var b=document.createElement('div');b.className='cb
 var convo=[];
 function isSilent(t,img){
   if(/\?/.test(t))return false;
-  if(img)return true;
-  return /(gegessen|getrunken|erledigt|aufgetaut|gemacht|abgehakt|getankt|ausgegeben|gekauft|gewogen|trainiert|merk dir)/i.test(t);
+  if(/^\s*(wie|was|wann|warum|wieso|welche|wo\b|wer\b|zeig|erkl\u00e4r|sag mir|gib mir|hast du)/i.test(t))return false;
+  return true;
 }
 function askBuddy(text,image){
   text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
