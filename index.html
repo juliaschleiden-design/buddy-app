@@ -140,41 +140,50 @@ function isSilent(t,img){
   if(/auswert|\u00fcberblick|ueberblick|analyse|bilanz|bericht|zusammenfass|empfehl|vorschlag|erz\u00e4hl|prognose/i.test(c))return false;
   return true;
 }
-var buddyBusy=false,buddyQueue=[];
+// Senden = Zeile in `nachrichten`; der echte Buddy auf Julias PC antwortet, ein Poller holt die Antwort.
+var lastSeen=new Date().toISOString(), typingBubble=null, lastSilent=false, historyLoaded=false;
 function askBuddy(text,image){
   text=String(text||'').replace(/^\s*(Buddy|Hej)[,!\s]*/i,'').trim();
   if(!text&&!image)return;
-  var silent=isSilent(text,image)&&chatpanel.style.display!=='flex';
-  addBubble('user',text||'📷 Foto',silent);
-  if(silent){ showToast((image?'📷 ':'')+'Trag ich ein…'); }
-  else{ try{chatin.focus();}catch(e){} }
-  buddyQueue.push({t:text,img:image||null,silent:silent});
-  pumpBuddy();
-}
-function pumpBuddy(){
-  if(buddyBusy||!buddyQueue.length)return;
-  buddyBusy=true;
-  var job=buddyQueue.shift();
-  var typing=job.silent?null:addBubble('buddy','🦦 denkt…');
-  var done=function(){buddyBusy=false;pumpBuddy();};
+  lastSilent=isSilent(text,image)&&chatpanel.style.display!=='flex';
+  addBubble('user',text||'📷 Foto',lastSilent);
+  if(lastSilent){ showToast((image?'📷 ':'')+'Schick ich rüber…'); }
+  else{ try{chatin.focus();}catch(e){} if(!typingBubble)typingBubble=addBubble('buddy','🦦 denkt…'); }
   refreshSession().then(function(s){
-    if(!s){if(typing)typing.remove();done();showGate();return;}
-    return fetch(SB_URL+'/functions/v1/buddy',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json'},body:JSON.stringify({message:job.t,history:convo,image:job.img})})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        if(typing)typing.remove();
-        var reply=(d&&d.reply)||(d&&d.error)||'Hm, da ging gerade was schief. 🙈';
-        convo.push({role:'user',content:job.t||'(Foto)'});convo.push({role:'assistant',content:reply});
-        if(convo.length>20)convo=convo.slice(-20);
-        if(job.silent){
-          var needChat=/\?/.test(reply)||reply.length>170;
-          addBubble('buddy',reply,!needChat);
-          if(needChat){ try{chatin.focus();}catch(e){} } else showToast(reply);
-        } else { addBubble('buddy',reply); }
-        try{render(current);}catch(e){}
-        done();
+    if(!s){if(typingBubble){typingBubble.remove();typingBubble=null;}showGate();return;}
+    var bild=image?('data:'+(image.media_type||'image/jpeg')+';base64,'+image.data):null;
+    return fetch(SB_URL+'/rest/v1/nachrichten',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({rolle:'julia',text:text||null,bild:bild,status:'neu'})});
+  }).catch(function(){if(typingBubble){typingBubble.remove();typingBubble=null;}showToast('Ging gerade nicht durch 🙈');});
+}
+function pollBuddy(){
+  refreshSession().then(function(s){
+    if(!s)return;
+    var url=SB_URL+'/rest/v1/nachrichten?rolle=eq.buddy&created_at=gt.'+encodeURIComponent(lastSeen)+'&order=created_at.asc&select=text,created_at';
+    return fetch(url,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token}}).then(function(r){return r.json();}).then(function(rows){
+      if(!rows||!rows.length)return;
+      rows.forEach(function(r2){
+        lastSeen=r2.created_at;
+        var reply=r2.text||'…';
+        if(typingBubble){typingBubble.remove();typingBubble=null;}
+        var open=chatpanel.style.display==='flex';
+        var needChat=/\?/.test(reply)||reply.length>170;
+        if(open){ addBubble('buddy',reply); }
+        else if(!lastSilent||needChat){ addBubble('buddy',reply); try{chatin.focus();}catch(e){} }
+        else { addBubble('buddy',reply,true); showToast(reply); }
       });
-  }).catch(function(){if(typing)typing.remove();if(!job.silent)addBubble('buddy','Ich erreiche mich selbst gerade nicht – kurz später nochmal? 🙈');else showToast('Ging gerade nicht durch 🙈');done();});
+      try{render(current);}catch(e){}
+    });
+  }).catch(function(){});
+}
+setInterval(function(){ if(document.getElementById('app').style.display!=='none') pollBuddy(); },4000);
+function loadChatHistory(){
+  if(historyLoaded)return; historyLoaded=true;
+  refreshSession().then(function(s){
+    if(!s)return;
+    return fetch(SB_URL+'/rest/v1/nachrichten?order=created_at.desc&limit=12&select=rolle,text,created_at',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token}}).then(function(r){return r.json();}).then(function(rows){
+      (rows||[]).reverse().forEach(function(m){ if(m.text)addBubble(m.rolle==='julia'?'user':'buddy',m.text,true); if(m.created_at>lastSeen)lastSeen=m.created_at; });
+    });
+  }).catch(function(){});
 }
 window.addEventListener('message',function(e){
   var d=e.data||{};
@@ -229,7 +238,7 @@ function setSess(d){localStorage.setItem(SESS_KEY,JSON.stringify({access_token:d
 function clearSess(){localStorage.removeItem(SESS_KEY);}
 function authFetch(path,body){return fetch(SB_URL+path,{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});}
 function gmsg(t,ok){var m=document.getElementById('gmsg');if(m){m.textContent=t;m.style.color=ok?'#3B6D11':'#B23A3A';}}
-function startApp(){var g=document.getElementById('gate');if(g)g.style.display='none';document.getElementById('app').style.display='flex';render('s33');}
+function startApp(){var g=document.getElementById('gate');if(g)g.style.display='none';document.getElementById('app').style.display='flex';render('s33');try{loadChatHistory();}catch(e){}}
 function showGate(){document.getElementById('app').style.display='none';var g=document.getElementById('gate');if(g)g.style.display='flex';}
 function refreshSession(){var s=getSess();if(!s)return Promise.resolve(null);if(Date.now()<(s.expires_at-90)*1000)return Promise.resolve(s);return authFetch('/auth/v1/token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(!d){clearSess();return null;}setSess(d);return getSess();}).catch(function(){return null;});}
 function doLogin(){var e=(document.getElementById('gmail').value||'').trim(),p=document.getElementById('gpw').value||'';if(!e||!p){gmsg('Bitte E-Mail und Passwort eingeben.');return;}gmsg('Moment…',true);authFetch('/auth/v1/token?grant_type=password',{email:e,password:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(x){if(!x.ok){gmsg(x.d.error_description||x.d.msg||x.d.error||'Anmeldung hat nicht geklappt.');return;}setSess(x.d);startApp();}).catch(function(){gmsg('Keine Verbindung.');});}
